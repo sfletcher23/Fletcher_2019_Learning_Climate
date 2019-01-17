@@ -1,0 +1,5 @@
+for i=1:8
+figure
+pp
+plot(xoutMAT(i,:,:))
+end

@@ -1,0 +1,1 @@
+All the output files are copied to inputfolder "INPUTDATA" and simulations are made 
