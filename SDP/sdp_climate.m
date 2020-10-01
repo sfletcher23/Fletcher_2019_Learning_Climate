@@ -12,7 +12,7 @@
 
 %% Setup 
 
-% Set Project root folder andAdd subfolders to path; runs either on desktop 
+% Set Project root folder and and subfolders to path; runs either on desktop 
 % or on a cluster using SLURM queueing system 
 if ~isempty(getenv('SLURM_JOB_ID'))
     projpath = '/net/fs02/d2/sfletch/Mombasa_climate';
@@ -217,12 +217,28 @@ end
 % generate time series of monthly T and P based on 20-year means from state
 % space
 
+
 if runParam.runTPts
 
-    T_ts = cell(M_T_abs,N);
+    % T_ts and P_ts are cells with dimensions: number of T/P states by
+    % number of time periods. Therefore, each cell corresponds to an SDP
+    % state (Actually - looks like only 1 time period has data - I think we
+    % found that the T and P anomalies weren't very different across the time
+    % periods so we didn't differentiate).
+    
+    % Within each cell, there is a 100 X 240 matrix. The 100 rows correspond to
+    % different samples generated from the k-nn approach. The 240 columns
+    % correspond to montlhy values over a 20 year period.
+    
+    T_ts = cell(M_T_abs,N); 
     P_ts = cell(M_P_abs,N);
 
+    % This function applies the K-nn bootstrap approach to generate T and P
+    % anomalies (MJL are the initials of the developer, Megan Lickley)
     [Tanom, Panom] = mean2TPtimeseriesMJL_2(1, runParam.steplen, climParam.numSampTS); 
+    
+    % The above results are the anomalies from the mean T and P; here I add
+    % the means back in and save in the cells T_ts and P_ts I defined above
     for t = 1:N
 
         for i = 1:M_T_abs  
@@ -237,8 +253,11 @@ if runParam.runTPts
 
     end
 
-    savename_runoff = strcat('runoff_by_state_', jobid,'_', datetime);
-    save(savename_runoff, 'T_ts', 'P_ts')
+%     % This looks like an error - this part should save the T and P
+%     % anomalies. Runoff hasn't been calculated yet! I'm going to comment
+%     % it out
+%     savename_runoff = strcat('runoff_by_state_', jobid,'_', datetime);
+%     save(savename_runoff, 'T_ts', 'P_ts')
 
 end
 
@@ -248,7 +267,9 @@ end
 
 if runParam.runRunoff 
 
-    % Generate runoff timeseries - different set for each T,P combination
+    % We're going to generate 100 runoff timeseries for each state, so we
+    % initialze a cell array with a different cell corresponding to each T,
+    % P, and time state
     runoff = cell(M_T_abs, M_P_abs, N);
 
 
@@ -277,6 +298,9 @@ if runParam.runRunoff
 
             end
 
+            % Each cell contains a 100 x 240 timeseries. The rows
+            % correspond to 100 different simulations. The columns
+            % correspond to monthly values over 20 years
             runoff(i, :, t) = runoff_temp;
 
         end
@@ -324,6 +348,12 @@ end
 
 if runParam.calcShortage
 
+    % Initialize variables - we need to save simulation results according
+    % by state. Note up until this point we didn't inlclude the storage
+    % state variable - that's beacuse the amount of reservoir storage
+    % doesn't impact the T, P, and runoff estimates. But it does impact
+    % yield and unmet demand, so now we include it. 
+    
     unmet_ag = nan(M_T_abs, M_P_abs, length(storage), N);   % Unmet demand for agriculture use
     unmet_dom = nan(M_T_abs, M_P_abs, length(storage), N);  % Unmet demand for domestic use
     yield = nan(M_T_abs, M_P_abs, length(storage), N);  % Yield from reservoir
@@ -361,6 +391,9 @@ if runParam.calcShortage
                     
                     % Calculate umment demand, allowing for 10% of domestic demand
                     % to be unpenalized, per 90% reliability goal
+                        % Note these values are hard coded - we could introduce
+                        % variables here instead and add a parameter at the
+                        % beginning to change this.
                     unmet_dom_90 = max(unmet_dom_mdl - cmpd2mcmpy(186000)*.1, 0); 
                     unmet_ag(index_s_t, index_s_p, s, t) = mean(sum(unmet_ag_mdl,2));
                     unmet_dom(index_s_t, index_s_p, s, t) = mean(sum(unmet_dom_90,2));
@@ -405,13 +438,13 @@ if runParam.runSDP
 
 % Initialize best value and best action matrices
 % Temperature states x precipitaiton states x capacity states, time
-V = NaN(M_T_abs, M_P_abs, M_C, N+1);
-X = NaN(M_T_abs, M_P_abs, M_C, N);
+V = NaN(M_T_abs, M_P_abs, M_C, N+1); % Optimal value matrix
+X = NaN(M_T_abs, M_P_abs, M_C, N); % Optimal action matrix
 
-% Terminal period
+% Define V for terminal period as 0
 V(:,:,:,N+1) = zeros(M_T_abs, M_P_abs, M_C, 1);
 
-% Loop over all time periods
+% Backwards recursion
 for t = linspace(N,1,N)
     
     % Calculate nextV    
@@ -433,8 +466,8 @@ for t = linspace(N,1,N)
             for index_s_c = 1:M_C
                 sc = s_C(index_s_c);
 
-                bestV = Inf;  % Best value
-                bestX = 0;  % Best action
+                bestV = Inf;  % Inititialize best value (infinite cost)
+                bestX = 0;  % Initialize best action (do nothing)
 
                 % Update available actions based on time and whether expansion available
                 
